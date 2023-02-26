@@ -186,22 +186,22 @@ public class BubbleManager : MonoBehaviour {
 	void SetScoreMulti(int linkCount)
 	{
 		if (linkCount <= 3) {
-			this.scoreMulti = 1;
+			this.scoreMulti = 1.6f;
 
 		} else if (linkCount == 4) {
-			this.scoreMulti =1.5f;
+			this.scoreMulti =1.65f;
 
 		}else if (linkCount == 5) {
-			this.scoreMulti =2f;
+			this.scoreMulti =1.7f;
 
 		}else if (linkCount == 6) {
-			this.scoreMulti =2.5f;
+			this.scoreMulti =1.8f;
 
 		}else if (7<=linkCount && linkCount <=9) {
-			this.scoreMulti =3f;
+			this.scoreMulti =2f;
 
 		}else {
-			this.scoreMulti =4f;
+			this.scoreMulti =2.5f;
 		}
 	}
 
