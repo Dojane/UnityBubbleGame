@@ -8,6 +8,7 @@ using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 
+
 namespace PathologicalGames
 {
     
@@ -201,6 +202,73 @@ namespace PathologicalGames
         }
 
 
+
+		public delegate GameObject InstantiateDelegate(GameObject prefab, Vector3 pos, Quaternion rot);
+		public delegate void DestroyDelegate(GameObject instance);
+
+		/// <summary>
+		/// This can be used to intercept Instantiate and Destroy to implement your own handling. See 
+		/// PoolManagerExampleFiles/Scripts/InstanceHandlerDelegateExample.cs.
+		/// 
+		/// Simply add your own delegate and it will be run to create a new instance. 
+		/// 
+		/// If at least one delegate is added to InstanceHandler.InstantiateDelegates it will be used instead of 
+		/// Unity's Instantiate.
+		/// 
+		/// Setting a delegate on the SpawnPool here will override a global delegate, if used. See the 
+		/// static InstanceHandler for details on global override delegates
+		/// </summary>
+		public InstantiateDelegate instantiateDelegates;
+
+		/// <summary>
+		/// This can be used to intercept Instantiate and Destroy to implement your own handling. See 
+		/// PoolManagerExampleFiles/Scripts/InstanceHandlerDelegateExample.cs.
+		/// 
+		/// Simply add your own delegate and it will be run to destroy an instance. 
+		/// 
+		/// If at least one delegate is added to InstanceHandler.DestroyDelegates it will be used instead of 
+		/// Unity's Instantiate.
+		/// </summary>
+		public DestroyDelegate destroyDelegates;
+		
+		/// <summary>
+		/// See the InstantiateDelegates docs
+		/// </summary>
+		/// <param name="prefab">The prefab to spawn an instance from</param>
+		/// <param name="pos">The position to spawn the instance</param>
+		/// <param name="rot">The rotation of the new instance</param>
+		/// <returns>Transform</returns>
+		internal GameObject InstantiatePrefab(GameObject prefab, Vector3 pos, Quaternion rot)
+		{
+			if (this.instantiateDelegates != null)
+			{
+				return this.instantiateDelegates(prefab, pos, rot);
+			}
+			else
+			{
+				return InstanceHandler.InstantiatePrefab(prefab, pos, rot);
+			}
+		}
+		
+		
+		/// <summary>
+		/// See the DestroyDelegates docs
+		/// </summary>
+		/// <param name="prefab">The prefab to spawn an instance from</param>
+		/// <returns>void</returns>
+		internal void DestroyInstance(GameObject instance)
+		{
+			if (this.destroyDelegates != null)
+			{
+				this.destroyDelegates(instance);
+			}
+			else
+			{
+				InstanceHandler.DestroyInstance(instance);
+			}
+		}
+
+
         /// <summary>
         /// Runs when this group GameObject is destroyed and executes clean-up
         /// </summary>
@@ -209,15 +277,20 @@ namespace PathologicalGames
             if (this.logMessages)
                 Debug.Log(string.Format("SpawnPool {0}: Destroying...", this.poolName));
 
-            PoolManager.Pools.Remove(this);
+			if (PoolManager.Pools.ContainsValue(this))
+				PoolManager.Pools.Remove(this);
 
             this.StopAllCoroutines();
+
 
             // We don't need the references to spawns which are about to be destroyed
             this._spawned.Clear();
 
-            // Clean-up
-            foreach (PrefabPool pool in this._prefabPools) pool.SelfDestruct();
+			// Clean-up
+            foreach (PrefabPool pool in this._prefabPools) 
+			{
+				pool.SelfDestruct();
+			}
 
             // Probably overkill, and may not do anything at all, but...
             this._prefabPools.Clear();
@@ -258,40 +331,49 @@ namespace PathologicalGames
         /// </summary>
         /// <param name="prefabPool">A PrefabPool object</param>
         /// <returns>A List of instances spawned or an empty List</returns>
-        public void CreatePrefabPool(PrefabPool prefabPool)
-        {
-            // Only add a PrefabPool once. Uses a GameObject comparison on the prefabs
-            //   This will rarely be needed and will almost Always run at game start, 
-            //   even if user-executed. This really only fails If a user tries to create 
-            //   a PrefabPool using a prefab which already has a PrefabPool in the same
-            //   SpawnPool. Either user created twice or PoolManager went first or even 
-            //   second in cases where a user-script beats out PoolManager's init during 
-            //   Awake();
-            bool isAlreadyPool = this.GetPrefabPool(prefabPool.prefab) == null ? false : true;
-            if (!isAlreadyPool)
-            {
-                // Used internally to reference back to this spawnPool for things 
-                //   like anchoring co-routines.
-                prefabPool.spawnPool = this;
-
-                this._prefabPools.Add(prefabPool);
-
-                // Add to the prefabs dict for convenience
-                this.prefabs._Add(prefabPool.prefab.name, prefabPool.prefab);
-            }
-
-            // Preloading (uses a singleton bool to be sure this is only done once)
-            if (prefabPool.preloaded != true)
-            {
-                if (this.logMessages)
-                    Debug.Log(string.Format("SpawnPool {0}: Preloading {1} {2}",
-                                               this.poolName,
-                                               prefabPool.preloadAmount,
-                                               prefabPool.prefab.name));
-
-                prefabPool.PreloadInstances();
-            }
-        }
+		public void CreatePrefabPool(PrefabPool prefabPool)
+		{
+			// Only add a PrefabPool once. Uses a GameObject comparison on the prefabs
+			//   This will rarely be needed and will almost Always run at game start, 
+			//   even if user-executed. This really only fails If a user tries to create 
+			//   a PrefabPool using a prefab which already has a PrefabPool in the same
+			//   SpawnPool. Either user created twice or PoolManager went first or even 
+			//   second in cases where a user-script beats out PoolManager's init during 
+			//   Awake();
+			bool isAlreadyPool = this.GetPrefabPool(prefabPool.prefab) == null ? false : true;
+			if (isAlreadyPool)
+				throw new System.Exception(string.Format
+            	(
+					"Prefab '{0}' is already in  SpawnPool '{1}'. Prefabs can be in more than 1 SpawnPool but " +
+					"cannot be in the same SpawnPool twice.",
+					prefabPool.prefab, 
+					this.poolName
+				));
+			
+			// Used internally to reference back to this spawnPool for things 
+			//   like anchoring co-routines.
+			prefabPool.spawnPool = this;
+			
+			this._prefabPools.Add(prefabPool);
+			
+			// Add to the prefabs dict for convenience
+			this.prefabs._Add(prefabPool.prefab.name, prefabPool.prefab);
+			
+			// Preloading (uses a singleton bool to be sure this is only done once)
+			if (prefabPool.preloaded != true)
+			{
+				if (this.logMessages)
+					Debug.Log(string.Format
+					(
+						"SpawnPool {0}: Preloading {1} {2}",
+						this.poolName,
+						prefabPool.preloadAmount,
+						prefabPool.prefab.name
+					));
+				
+				prefabPool.PreloadInstances();
+			}
+		}
 
 
         /// <summary>
@@ -324,7 +406,11 @@ namespace PathologicalGames
                                                 this.poolName,
                                                 instance.name));
 
-                    if (parent) instance.parent = this.group;
+                    if (parent) 
+					{
+						var worldPositionStays = !(instance is RectTransform);
+						instance.SetParent(this.group, worldPositionStays);
+					}
 
                     // New instances are active and must be added to the internal list 
                     if (!despawn) this._spawned.Add(instance);
@@ -423,6 +509,7 @@ namespace PathologicalGames
         public Transform Spawn(Transform prefab, Vector3 pos, Quaternion rot, Transform parent)
         {
             Transform inst;
+			bool worldPositionStays;
 
             #region Use from Pool
             for (int i = 0; i < this._prefabPools.Count; i++)
@@ -439,15 +526,18 @@ namespace PathologicalGames
                     // This only happens if the limit option was used for this
                     //   Prefab Pool.
                     if (inst == null) return null;
-					
+
+					// This will handle RectTransforms as well
+					worldPositionStays = !(inst is RectTransform);
+
 					if (parent != null)  // User explicitly provided a parent
 					{
-						inst.parent = parent;
+						inst.SetParent(parent, worldPositionStays);
 					}
                     else if (!this.dontReparent && inst.parent != this.group)  // Auto organize?
 					{
 						// If a new instance was created, it won't be grouped
-                        inst.parent = this.group;
+						inst.SetParent(this.group, worldPositionStays);
 					}
 
                     // Add to internal list - holds only active instances in the pool
@@ -476,16 +566,16 @@ namespace PathologicalGames
 
             // Spawn the new instance (Note: prefab already set in PrefabPool)
             inst = newPrefabPool.SpawnInstance(pos, rot);
-			
+			worldPositionStays = !(inst is RectTransform);
 			if (parent != null)  // User explicitly provided a parent
 			{
-				inst.parent = parent;
+				inst.SetParent(parent, worldPositionStays);
 			}
-            else  // Auto organize
+			else if (!this.dontReparent && inst.parent != this.group)  // Auto organize?
 			{
-            	inst.parent = this.group;  
+				// If a new instance was created, it won't be grouped
+				inst.SetParent(this.group, worldPositionStays);
 			}
-
 
             // New instances are active and must be added to the internal list 
             this._spawned.Add(inst);
@@ -539,8 +629,31 @@ namespace PathologicalGames
         {
             return this.Spawn(prefab, Vector3.zero, Quaternion.identity, parent);
         }
-
-
+		
+		
+		#region GameObject Overloads
+		public Transform Spawn(GameObject prefab, Vector3 pos, Quaternion rot, Transform parent)
+		{
+			return Spawn(prefab.transform, pos, rot, parent);
+		}
+		
+		public Transform Spawn(GameObject prefab, Vector3 pos, Quaternion rot)
+		{
+			return Spawn(prefab.transform, pos, rot);
+		}
+		
+		public Transform Spawn(GameObject prefab)
+		{
+			return Spawn(prefab.transform);
+		}
+		
+		public Transform Spawn(GameObject prefab, Transform parent)
+		{
+			return Spawn(prefab.transform, parent);
+		}
+		#endregion GameObject Overloads
+		
+		
         /// <summary>
         /// See primary Spawn method for documentation.
         /// 
@@ -630,7 +743,7 @@ namespace PathologicalGames
                             	 Vector3 pos, Quaternion rot,
                             	 Transform parent)
         {
-            // Instance using the standard method before doing particle stuff
+            // Instance using the standard method before doing audio stuff
             Transform inst = Spawn(prefab.transform, pos, rot, parent);
 
             // Can happen if limit was used
@@ -704,76 +817,6 @@ namespace PathologicalGames
         }
 
 
-        /// <summary>
-        ///	See docs for SpawnInstance(ParticleSystems prefab, Vector3 pos, Quaternion rot)
-        ///	This is the same but for ParticleEmitters
-        ///	
-        /// IMPORTANT: 
-        ///     * This function turns off Unity's ParticleAnimator autodestruct if
-        ///       one is found.
-        /// </summary>
-        public ParticleEmitter Spawn(ParticleEmitter prefab,
-                                     Vector3 pos, Quaternion rot)
-        {
-            // Instance using the standard method before doing particle stuff
-            Transform inst = this.Spawn(prefab.transform, pos, rot);
-
-            // Can happen if limit was used
-            if (inst == null) return null;
-
-            // Make sure autodestrouct is OFF as it will cause null references
-            var animator = inst.GetComponent<ParticleAnimator>();
-            if (animator != null) animator.autodestruct = false;
-
-            // Get the emitter
-            var emitter = inst.GetComponent<ParticleEmitter>();
-            emitter.emit = true;
-
-            this.StartCoroutine(this.ListenForEmitDespawn(emitter));
-
-            return emitter;
-        }
-
-
-        /// <summary>
-        /// This will not be supported for Shuriken particles. This will eventually 
-        /// be depricated.
-        /// </summary>
-        /// <param name="prefab">
-        /// The prefab to instance. Not used if an instance already exists in 
-        /// the scene that is queued for reuse. Type = ParticleEmitter
-        /// </param>
-        /// <param name="pos">The position to set the instance to</param>
-        /// <param name="rot">The rotation to set the instance to</param>
-        /// <param name="colorPropertyName">Same as Material.SetColor()</param>
-        /// <param name="color">a Color object. Same as Material.SetColor()</param>
-        /// <returns>The instance's ParticleEmitter</returns>
-        public ParticleEmitter Spawn(ParticleEmitter prefab,
-                                     Vector3 pos, Quaternion rot,
-                                     string colorPropertyName, Color color)
-        {
-            // Instance using the standard method before doing particle stuff
-            Transform inst = this.Spawn(prefab.transform, pos, rot);
-
-            // Can happen if limit was used
-            if (inst == null) return null;
-
-            // Make sure autodestrouct is OFF as it will cause null references
-            var animator = inst.GetComponent<ParticleAnimator>();
-            if (animator != null) animator.autodestruct = false;
-
-            // Get the emitter
-            var emitter = inst.GetComponent<ParticleEmitter>();
-
-            // Set the color of the particles, then emit
-            emitter.GetComponent<Renderer>().material.SetColor(colorPropertyName, color);
-            emitter.emit = true;
-
-            this.StartCoroutine(ListenForEmitDespawn(emitter));
-
-            return emitter;
-        }
-
 
         /// <summary>
         ///	If the passed object is managed by the SpawnPool, it will be 
@@ -828,7 +871,9 @@ namespace PathologicalGames
         /// </summary>
         public void Despawn(Transform instance, Transform parent)
         {
-            instance.parent = parent;
+			// Spawn the new instance (Note: prefab already set in PrefabPool)
+			bool worldPositionStays = !(instance is RectTransform);
+			instance.SetParent(parent, worldPositionStays);
             this.Despawn(instance);
         }
 
@@ -992,52 +1037,22 @@ namespace PathologicalGames
             // Safer to wait a frame before testing if playing.
             yield return null;
 
+			GameObject srcGameObject = src.gameObject;
             while (src.isPlaying)
+			{
                 yield return null;
+			}
+
+			// Handle despawed while still playing
+			if (!srcGameObject.activeInHierarchy)
+			{
+				src.Stop();
+				yield break;
+			}
 
             this.Despawn(src.transform);
         }
 
-
-        /// <summary>
-        /// Used to determine when a particle emiter should be despawned
-        /// </summary>
-        /// <param name="emitter">ParticleEmitter to process</param>
-        /// <returns></returns>
-        private IEnumerator ListenForEmitDespawn(ParticleEmitter emitter)
-        {
-            // This will wait for the particles to emit. Without this, there will
-            //   be no particles in the while test below. I don't know why the extra 
-            //   frame is required but should never be noticable. No particles can
-            //   fade out that fast and still be seen to change over time.
-            yield return null;
-            yield return new WaitForEndOfFrame();
-
-            // Do nothing until all particles die or the safecount hits a max value
-            float safetimer = 0;   // Just in case! See Spawn() for more info
-            while (emitter.particleCount > 0)
-            {
-                safetimer += Time.deltaTime;
-                if (safetimer > this.maxParticleDespawnTime)
-                    Debug.LogWarning
-                    (
-                        string.Format
-                        (
-                            "SpawnPool {0}: " +
-                                "Timed out while listening for all particles to die. " +
-                                "Waited for {1}sec.",
-                            this.poolName,
-                            this.maxParticleDespawnTime
-                        )
-                    );
-
-                yield return null;
-            }
-
-            // Turn off emit before despawning
-            emitter.emit = false;
-            this.Despawn(emitter.transform);
-        }
 
         // ParticleSystem (Shuriken) Version...
         private IEnumerator ListenForEmitDespawn(ParticleSystem emitter)
@@ -1045,18 +1060,13 @@ namespace PathologicalGames
             // Wait for the delay time to complete
             // Waiting the extra frame seems to be more stable and means at least one 
             //  frame will always pass
-            yield return new WaitForSeconds(emitter.startDelay + 0.25f);
+			yield return new WaitForSeconds(emitter.main.startDelay.constantMax + 0.25f);
 
             // Do nothing until all particles die or the safecount hits a max value
             float safetimer = 0;   // Just in case! See Spawn() for more info
-            while (emitter.IsAlive(true))
+			GameObject emitterGO = emitter.gameObject;
+			while (emitter.IsAlive(true) && emitterGO.activeInHierarchy)
             {
-                if (!PoolManagerUtils.activeInHierarchy(emitter.gameObject))
-                {
-                    emitter.Clear(true);
-                    yield break;  // Do nothing, already despawned. Quit.
-                }
-
                 safetimer += Time.deltaTime;
                 if (safetimer > this.maxParticleDespawnTime)
                     Debug.LogWarning
@@ -1075,8 +1085,11 @@ namespace PathologicalGames
             }
 
             // Turn off emit before despawning
-            //emitter.Clear(true);
-            this.Despawn(emitter.transform);
+			if (emitterGO.activeInHierarchy)
+			{
+				this.Despawn(emitter.transform);
+				emitter.Clear(true);
+			}
         }
 
         #endregion Utility Functions
@@ -1353,22 +1366,27 @@ namespace PathologicalGames
         /// </summary>
         internal void SelfDestruct()
         {
-            // Probably overkill but no harm done
-            this.prefab = null;
-            this.prefabGO = null;
-            this.spawnPool = null;
+			if (this.logMessages)
+				Debug.Log(string.Format(
+					"SpawnPool {0}: Cleaning up PrefabPool for {1}...", this.spawnPool.poolName, this.prefabGO.name
+				));
 
             // Go through both lists and destroy everything
             foreach (Transform inst in this._despawned)
-                if (inst != null)
-                    Object.Destroy(inst.gameObject);
+                if (inst != null && this.spawnPool != null)  // Tear-down-time protection
+					this.spawnPool.DestroyInstance(inst.gameObject);
 
             foreach (Transform inst in this._spawned)
-                if (inst != null)
-                    Object.Destroy(inst.gameObject);
+				if (inst != null && this.spawnPool != null)  // Tear-down-time protection
+					this.spawnPool.DestroyInstance(inst.gameObject);
 
             this._spawned.Clear();
             this._despawned.Clear();
+
+			// Probably overkill but no harm done
+			this.prefab = null;
+			this.prefabGO = null;
+			this.spawnPool = null;
         }
         #endregion Constructor and Self-Destruction
 
@@ -1462,7 +1480,7 @@ namespace PathologicalGames
 				);
 
             // Deactivate the instance and all children
-            PoolManagerUtils.SetActive(xform.gameObject, false);
+			xform.gameObject.SetActive(false);
 
             // Trigger culling if the feature is ON and the size  of the 
             //   overall pool is over the Cull Above threashold.
@@ -1513,7 +1531,7 @@ namespace PathologicalGames
                     {
                         Transform inst = this._despawned[0];
                         this._despawned.RemoveAt(0);
-                        MonoBehaviour.Destroy(inst.gameObject);
+						this.spawnPool.DestroyInstance(inst.gameObject);
 
                         if (this.logMessages)
                             Debug.Log(string.Format("SpawnPool {0} ({1}): " +
@@ -1626,7 +1644,7 @@ namespace PathologicalGames
                 //   Reactivate the instance and all children
                 inst.position = pos;
                 inst.rotation = rot;
-                PoolManagerUtils.SetActive(inst.gameObject, true);
+				inst.gameObject.SetActive(true);
 
             }
 			
@@ -1676,11 +1694,18 @@ namespace PathologicalGames
             if (pos == Vector3.zero) pos = this.spawnPool.group.position;
             if (rot == Quaternion.identity) rot = this.spawnPool.group.rotation;
 
-            var inst = (Transform)Object.Instantiate(this.prefab, pos, rot);
-            this.nameInstance(inst);  // Adds the number to the end
+			GameObject instGO = this.spawnPool.InstantiatePrefab(this.prefabGO, pos, rot);
+			Transform inst = instGO.transform;
+
+			this.nameInstance(inst);  // Adds the number to the end
 
             if (!this.spawnPool.dontReparent)
-                inst.parent = this.spawnPool.group;  // The group is the parent by default
+			{
+				// The SpawnPool group is the parent by default
+				// This will handle RectTransforms as well
+				var worldPositionStays = !(inst is RectTransform);
+				inst.SetParent(this.spawnPool.group, worldPositionStays);
+			}
 
             if (this.spawnPool.matchPoolScale)
                 inst.localScale = Vector3.one;
@@ -1728,7 +1753,7 @@ namespace PathologicalGames
             if (despawn)
             {
                 // Deactivate the instance and all children
-                PoolManagerUtils.SetActive(inst.gameObject, false);
+				inst.gameObject.SetActive(false);
 
                 // Start Tracking as despawned
                 this._despawned.Add(inst);
@@ -1759,6 +1784,8 @@ namespace PathologicalGames
 
                 return;
             }
+
+			this.preloaded = true;
 
             if (this.prefab == null)
             {
@@ -2125,4 +2152,131 @@ namespace PathologicalGames
 
     }
 
+}
+
+
+public class ReadOnlyDictionary<TKey, TValue> : IDictionary<TKey, TValue>
+{
+	private readonly IDictionary<TKey, TValue> _dictionary;
+	
+	public ReadOnlyDictionary(IDictionary<TKey, TValue> dictionary)
+	{
+		_dictionary = dictionary;
+	}
+	
+	#region IDictionary<TKey,TValue> Members
+	
+	void IDictionary<TKey, TValue>.Add(TKey key, TValue value)
+	{
+		throw ReadOnlyException();
+	}
+	
+	public bool ContainsKey(TKey key)
+	{
+		return _dictionary.ContainsKey(key);
+	}
+	
+	public ICollection<TKey> Keys
+	{
+		get { return _dictionary.Keys; }
+	}
+	
+	bool IDictionary<TKey, TValue>.Remove(TKey key)
+	{
+		throw ReadOnlyException();
+	}
+	
+	public bool TryGetValue(TKey key, out TValue value)
+	{
+		return _dictionary.TryGetValue(key, out value);
+	}
+	
+	public ICollection<TValue> Values
+	{
+		get { return _dictionary.Values; }
+	}
+	
+	public TValue this[TKey key]
+	{
+		get
+		{
+			return _dictionary[key];
+		}
+	}
+	
+	TValue IDictionary<TKey, TValue>.this[TKey key]
+	{
+		get
+		{
+			return this[key];
+		}
+		set
+		{
+			throw ReadOnlyException();
+		}
+	}
+	
+	#endregion
+	
+	#region ICollection<KeyValuePair<TKey,TValue>> Members
+	
+	void ICollection<KeyValuePair<TKey, TValue>>.Add(KeyValuePair<TKey, TValue> item)
+	{
+		throw ReadOnlyException();
+	}
+	
+	void ICollection<KeyValuePair<TKey, TValue>>.Clear()
+	{
+		throw ReadOnlyException();
+	}
+	
+	public bool Contains(KeyValuePair<TKey, TValue> item)
+	{
+		return _dictionary.Contains(item);
+	}
+	
+	public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
+	{
+		_dictionary.CopyTo(array, arrayIndex);
+	}
+	
+	public int Count
+	{
+		get { return _dictionary.Count; }
+	}
+	
+	public bool IsReadOnly
+	{
+		get { return true; }
+	}
+	
+	bool ICollection<KeyValuePair<TKey, TValue>>.Remove(KeyValuePair<TKey, TValue> item)
+	{
+		throw ReadOnlyException();
+	}
+	
+	#endregion
+	
+	#region IEnumerable<KeyValuePair<TKey,TValue>> Members
+	
+	public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
+	{
+		return _dictionary.GetEnumerator();
+	}
+	
+	#endregion
+	
+	#region IEnumerable Members
+	
+	IEnumerator IEnumerable.GetEnumerator()
+	{
+		return GetEnumerator();
+	}
+	
+	#endregion
+	
+	private static System.Exception ReadOnlyException()
+	{
+		return new System.NotSupportedException("This dictionary is read-only");
+	}
 }

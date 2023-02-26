@@ -27,28 +27,73 @@ namespace PathologicalGames
         public static readonly SpawnPoolsDict Pools = new SpawnPoolsDict();
     }
 
+	
+	/// <summary>
+	/// This can be used to intercept Instantiate and Destroy to implement your own handling. See 
+	/// PoolManagerExampleFiles/Scripts/InstanceHandlerDelegateExample.cs.
+	/// 
+	/// Simply add your own delegate and it will be run. 
+	/// 
+	/// If a SpawnPool.InstantiateDelegate is used it will override the one set here.
+	/// </summary>
+	public static class InstanceHandler  
+	{
+		public delegate GameObject InstantiateDelegate(GameObject prefab, Vector3 pos, Quaternion rot);
+		public delegate void DestroyDelegate(GameObject instance);
 
-    public static class PoolManagerUtils
-    {
-        internal static void SetActive(GameObject obj, bool state)
-        {
-#if (UNITY_3_5 || UNITY_3_4 || UNITY_3_3 || UNITY_3_2 || UNITY_3_1 || UNITY_3_0)
-            obj.SetActiveRecursively(state);
-#else
-        obj.SetActive(state);
-#endif
-        }
+		/// <summary>
+		/// Creates a new instance. 
+		/// 
+		/// If at least one delegate is added to InstanceHandler.InstantiateDelegates it will be used instead of 
+		/// Unity's Instantiate.
+		/// </summary>
+		public static InstantiateDelegate InstantiateDelegates;
+	
+		/// <summary>
+		/// Destroys an instance. 
+		/// 
+		/// If at least one delegate is added to InstanceHandler.DestroyDelegates it will be used instead of 
+		/// Unity's Instantiate.
+		/// </summary>
+		public static DestroyDelegate DestroyDelegates;
 
-        internal static bool activeInHierarchy(GameObject obj)
-        {
-#if (UNITY_3_5 || UNITY_3_4 || UNITY_3_3 || UNITY_3_2 || UNITY_3_1 || UNITY_3_0)
-            return obj.active;
-#else
-        return obj.activeInHierarchy;
-#endif
-
-        }
-    }
+		/// <summary>
+		/// See the DestroyDelegates docs
+		/// </summary>
+		/// <param name="prefab">The prefab to spawn an instance from</param>
+		/// <param name="pos">The position to spawn the instance</param>
+		/// <param name="rot">The rotation of the new instance</param>
+		/// <returns>Transform</returns>
+		internal static GameObject InstantiatePrefab(GameObject prefab, Vector3 pos, Quaternion rot)
+		{
+			if (InstanceHandler.InstantiateDelegates != null)
+			{
+				return InstanceHandler.InstantiateDelegates(prefab, pos, rot);
+			}
+			else
+			{
+				 return Object.Instantiate(prefab, pos, rot) as GameObject;
+			}
+		}
+		
+		
+		/// <summary>
+		/// See the InstantiateDelegates docs
+		/// </summary>
+		/// <param name="prefab">The prefab to spawn an instance from</param>
+		/// <returns>void</returns>
+		internal static void DestroyInstance(GameObject instance)
+		{
+			if (InstanceHandler.DestroyDelegates != null)
+			{
+				InstanceHandler.DestroyDelegates(instance);
+			}
+			else
+			{
+				Object.Destroy(instance);
+			}
+		}
+	}
 
 
     public class SpawnPoolsDict : IDictionary<string, SpawnPool>
@@ -65,6 +110,11 @@ namespace PathologicalGames
 			if (!this.onCreatedDelegates.ContainsKey(poolName))
 			{
 				this.onCreatedDelegates.Add(poolName, createdDelegate);
+
+				Debug.Log(string.Format(
+					"Added onCreatedDelegates for pool '{0}': {1}", poolName, createdDelegate.Target)
+				);
+
 				return;
 			}
 			
@@ -80,6 +130,10 @@ namespace PathologicalGames
 				);
 			
 			this.onCreatedDelegates[poolName] -= createdDelegate;
+
+			Debug.Log(string.Format(
+				"Removed onCreatedDelegates for pool '{0}': {1}", poolName, createdDelegate.Target)
+			);
 		}
 		
 		#endregion Event Handling
@@ -218,7 +272,7 @@ namespace PathologicalGames
 
             // Remove it from the dict in case the user re-creates a SpawnPool of the 
             //  same name later
-            //this._pools.Remove(spawnPool.poolName);
+            this._pools.Remove(spawnPool.poolName);  
 
             return true;
         }
@@ -232,10 +286,13 @@ namespace PathologicalGames
         public void DestroyAll()
         {
             foreach (KeyValuePair<string, SpawnPool> pair in this._pools)
-                UnityEngine.Object.Destroy(pair.Value);
+			{
+				Debug.Log("DESTROYING: " + pair.Value.gameObject.name);
+                UnityEngine.Object.Destroy(pair.Value.gameObject);
+			}
 
             // Clear the dict in case the user re-creates a SpawnPool of the same name later
-            this._pools.Clear();
+			this._pools.Clear(); 
         }
         #endregion Public Custom Memebers
 
@@ -263,7 +320,9 @@ namespace PathologicalGames
             }
 
             this._pools.Add(spawnPool.poolName, spawnPool);
-			
+
+			Debug.Log(string.Format("Added pool '{0}'", spawnPool.poolName));
+
 			if (this.onCreatedDelegates.ContainsKey(spawnPool.poolName))
 				 this.onCreatedDelegates[spawnPool.poolName](spawnPool);
         }
@@ -286,11 +345,12 @@ namespace PathologicalGames
         /// <param name="spawnPool"></param>
         internal bool Remove(SpawnPool spawnPool)
         {
-            if (!this.ContainsKey(spawnPool.poolName))
+            if (!this.ContainsValue(spawnPool) & Application.isPlaying)
             {
-                Debug.LogError(string.Format("PoolManager: Unable to remove '{0}'. " +
-                                                "Pool not in PoolManager",
-                                            spawnPool.poolName));
+                Debug.LogError(string.Format(
+					"PoolManager: Unable to remove '{0}'. Pool not in PoolManager",
+                     spawnPool.poolName
+				));
                 return false;
             }
 
@@ -323,7 +383,17 @@ namespace PathologicalGames
             return this._pools.ContainsKey(poolName);
         }
 
-        /// <summary>
+		/// <summary>
+		/// Returns true if a SpawnPool instance exists in this Pools dict.
+		/// </summary>
+		/// <param name="poolName">The name to look for</param>
+		/// <returns>True if the pool exists, otherwise, false.</returns>
+		public bool ContainsValue(SpawnPool pool)
+		{
+			return this._pools.ContainsValue(pool);
+		}
+
+		/// <summary>
         /// Used to get a SpawnPool when the user is not sure if the pool name is used.
         /// This is faster than checking IsPool(poolName) and then accessing Pools][poolName.]
         /// </summary>
@@ -340,8 +410,10 @@ namespace PathologicalGames
         #region Not Implimented
         public bool Contains(KeyValuePair<string, SpawnPool> item)
         {
-            string msg = "Use PoolManager.Pools.Contains(string poolName) instead.";
-            throw new System.NotImplementedException(msg);
+			throw new System.NotImplementedException(
+				"Use PoolManager.Pools.ContainsKey(string poolName) or " +
+				"PoolManager.Pools.ContainsValue(SpawnPool pool) instead."
+			);
         }
 
         public SpawnPool this[string key]
@@ -459,4 +531,5 @@ namespace PathologicalGames
         #endregion Dict Functionality
 
     }
+
 }
