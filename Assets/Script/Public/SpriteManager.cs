@@ -25,8 +25,25 @@ public class SpriteManager : MonoBehaviour {
 
 	void Awake()
 	{
-		Instance = this;
-		DontDestroyOnLoad (gameObject);
+		
+
+	/*
+		修复报错问题。
+	
+	if (instance == null)
+    {
+	
+        DontDestroyOnLoad(gameObject);
+        instance = this;
+    }
+    else
+	{
+   if (instance != this)
+        Destroy(gameObject);
+	}
+     */
+	//Instance = this;
+	 //DontDestroyOnLoad (gameObject);
 
 		for (int i=0; i<spriteList.Count; ++i) {
 			spriteTable.Add(spriteList[i].name,spriteList[i]);
